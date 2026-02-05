@@ -20,6 +20,7 @@ import type {
   Task,
   TaskStatus,
   AgentCard,
+  TaskResult,
 } from '../types/index.js';
 import { AgentRegistry } from '../storage/AgentRegistry.js';
 import { ErrorCodes, createError, getErrorMessage } from '../errors/index.js';
@@ -429,6 +430,61 @@ export class A2AClient {
     } catch (error) {
       throw createError(
         ErrorCodes.TASK_CANCEL_FAILED,
+        taskId,
+        targetAgentId,
+        getErrorMessage(error)
+      );
+    }
+  }
+
+  /**
+   * Get task execution result
+   *
+   * Fetches the execution result of a completed task from the target agent.
+   * This provides access to the actual output/return value of the task execution.
+   *
+   * @param targetAgentId - ID of the agent that executed the task
+   * @param taskId - ID of the task to get result for
+   * @returns Task execution result with success status and output
+   * @throws Error if agent not found or request fails
+   *
+   * @example
+   * ```typescript
+   * const result = await client.getTaskResult('agent-2', 'task-123');
+   * if (result.success) {
+   *   console.log('Result:', result.result);
+   * } else {
+   *   console.error('Error:', result.error);
+   * }
+   * ```
+   */
+  async getTaskResult(targetAgentId: string, taskId: string): Promise<TaskResult> {
+    try {
+      return await retryWithBackoff(
+        async () => {
+          const agent = this.registry.get(targetAgentId);
+          if (!agent) {
+            throw createError(ErrorCodes.AGENT_NOT_FOUND, targetAgentId);
+          }
+
+          const url = `${agent.baseUrl}/a2a/tasks/${encodeURIComponent(taskId)}/result`;
+
+          const response = await this.fetchWithTimeout(url, {
+            method: 'GET',
+            headers: this.getAuthHeaders(),
+          });
+
+          return await this.handleResponse<TaskResult>(response);
+        },
+        {
+          ...this.retryConfig,
+          operationName: `A2A getTaskResult ${taskId} from ${targetAgentId}`,
+          isRetryable: this.isRetryableHttpError.bind(this),
+        }
+      );
+    } catch (error) {
+      throw createError(
+        ErrorCodes.TASK_GET_FAILED,
         taskId,
         targetAgentId,
         getErrorMessage(error)

@@ -58,3 +58,6 @@ export type {
   RateLimitError,
   RateLimitStats,
 } from './rateLimit.js';
+
+// Task result types
+export type { TaskResult } from './TaskResult.js';
