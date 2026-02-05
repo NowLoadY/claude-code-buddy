@@ -112,4 +112,96 @@ describe('A2AClient - Task Result Query', () => {
       client.getTaskResult(mockAgentId, mockTaskId)
     ).rejects.toThrow('Task result not found');
   });
+
+  describe('Security validations (CRITICAL fixes)', () => {
+    it('should reject taskId with path traversal patterns', async () => {
+      await expect(
+        client.getTaskResult(mockAgentId, '../../../etc/passwd')
+      ).rejects.toThrow("Invalid parameter 'taskId': contains invalid characters");
+
+      await expect(
+        client.getTaskResult(mockAgentId, 'task/with/slashes')
+      ).rejects.toThrow("Invalid parameter 'taskId': contains invalid characters");
+    });
+
+    it('should reject taskId exceeding maximum length', async () => {
+      const longTaskId = 'a'.repeat(256);
+      await expect(
+        client.getTaskResult(mockAgentId, longTaskId)
+      ).rejects.toThrow("Invalid parameter 'taskId': exceeds maximum length of 255");
+    });
+
+    it('should reject empty or invalid taskId', async () => {
+      await expect(
+        client.getTaskResult(mockAgentId, '')
+      ).rejects.toThrow("Invalid parameter 'taskId': must be non-empty string");
+    });
+
+    it('should reject targetAgentId with invalid characters', async () => {
+      await expect(
+        client.getTaskResult('../bad-agent', mockTaskId)
+      ).rejects.toThrow("Invalid parameter 'targetAgentId': contains invalid characters");
+    });
+
+    it('should reject response exceeding size limit (content-length header)', async () => {
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: new Headers({
+          'content-type': 'application/json',
+          'content-length': '11000000', // 11MB > 10MB limit
+        }),
+        json: async () => ({
+          success: true,
+          data: { taskId: mockTaskId, state: 'COMPLETED', success: true },
+        }),
+      } as Response);
+
+      await expect(
+        client.getTaskResult(mockAgentId, mockTaskId)
+      ).rejects.toThrow('Response size exceeds maximum allowed');
+    });
+
+    it('should reject malformed response schema', async () => {
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({
+          success: true,
+          data: {
+            taskId: mockTaskId,
+            state: 'INVALID_STATE', // Invalid enum value
+            success: true,
+            executedAt: '2026-02-05T10:00:00.000Z',
+            executedBy: mockAgentId,
+          },
+        }),
+      } as Response);
+
+      await expect(
+        client.getTaskResult(mockAgentId, mockTaskId)
+      ).rejects.toThrow('Response schema validation failed');
+    });
+
+    it('should reject response with missing required fields', async () => {
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({
+          success: true,
+          data: {
+            taskId: mockTaskId,
+            state: 'COMPLETED',
+            // Missing: success, executedAt, executedBy
+          },
+        }),
+      } as Response);
+
+      await expect(
+        client.getTaskResult(mockAgentId, mockTaskId)
+      ).rejects.toThrow('Response schema validation failed');
+    });
+  });
 });
