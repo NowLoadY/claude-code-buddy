@@ -31,6 +31,9 @@ export type {
   Artifact,
 } from './task.js';
 
+// Task state machine
+export { VALID_STATE_TRANSITIONS, isValidStateTransition, isTerminalState } from './task.js';
+
 // Message types
 export type {
   Message,
